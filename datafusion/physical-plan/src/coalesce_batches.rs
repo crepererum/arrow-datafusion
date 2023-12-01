@@ -34,6 +34,7 @@ use crate::{
 use arrow::datatypes::SchemaRef;
 use arrow::error::Result as ArrowResult;
 use arrow::record_batch::RecordBatch;
+use arrow::util::pretty::pretty_format_batches;
 use datafusion_common::Result;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::EquivalenceProperties;
@@ -225,9 +226,11 @@ impl CoalesceBatchesStream {
             match input_batch {
                 Poll::Ready(x) => match x {
                     Some(Ok(batch)) => {
+                        println!("CoalesceBatches input:\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
                         if batch.num_rows() >= self.target_batch_size
                             && self.buffer.is_empty()
                         {
+                            println!("CoalesceBatches output (A):\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
                             return Poll::Ready(Some(Ok(batch)));
                         } else if batch.num_rows() == 0 {
                             // discard empty batches
@@ -247,6 +250,7 @@ impl CoalesceBatchesStream {
                                 self.buffer.clear();
                                 self.buffered_rows = 0;
                                 // return batch
+                                println!("CoalesceBatches output (B):\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
                                 return Poll::Ready(Some(Ok(batch)));
                             }
                         }
@@ -268,6 +272,7 @@ impl CoalesceBatchesStream {
                             self.buffer.clear();
                             self.buffered_rows = 0;
                             // return batch
+                            println!("CoalesceBatches output (C):\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
                             return Poll::Ready(Some(Ok(batch)));
                         }
                     }
