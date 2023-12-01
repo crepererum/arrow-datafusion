@@ -99,6 +99,7 @@ pub struct FileStream<F: FileOpener> {
     baseline_metrics: BaselineMetrics,
     /// Describes the behavior of the `FileStream` if file opening or scanning fails
     on_error: OnError,
+    partition: usize,
 }
 
 /// Represents the state of the next `FileOpenFuture`. Since we need to poll
@@ -276,6 +277,7 @@ impl<F: FileOpener> FileStream<F> {
             file_stream_metrics: FileStreamMetrics::new(metrics, partition),
             baseline_metrics: BaselineMetrics::new(metrics, partition),
             on_error: OnError::Fail,
+            partition,
         })
     }
 
@@ -507,7 +509,7 @@ impl<F: FileOpener> Stream for FileStream<F> {
         self.file_stream_metrics.time_processing.start();
         let result = self.poll_inner(cx);
         if let Poll::Ready(Some(Ok(batch))) = &result {
-            println!("FileStream output:\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
+            println!("FileStream({}) output:\n{}", self.partition, pretty_format_batches(&[batch.clone()]).unwrap());
         }
         self.file_stream_metrics.time_processing.stop();
         self.baseline_metrics.record_poll(result)
