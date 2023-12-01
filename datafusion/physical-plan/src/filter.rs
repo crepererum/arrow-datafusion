@@ -35,6 +35,7 @@ use crate::{
 use arrow::compute::filter_record_batch;
 use arrow::datatypes::{DataType, SchemaRef};
 use arrow::record_batch::RecordBatch;
+use arrow::util::pretty::pretty_format_batches;
 use datafusion_common::cast::as_boolean_array;
 use datafusion_common::stats::Precision;
 use datafusion_common::{plan_err, DataFusionError, Result};
@@ -310,6 +311,7 @@ impl Stream for FilterExecStream {
             match self.input.poll_next_unpin(cx) {
                 Poll::Ready(value) => match value {
                     Some(Ok(batch)) => {
+                        println!("FilterExec input:\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
                         let timer = self.baseline_metrics.elapsed_compute().timer();
                         let filtered_batch = batch_filter(&batch, &self.predicate)?;
                         // skip entirely filtered batches
@@ -317,6 +319,7 @@ impl Stream for FilterExecStream {
                             continue;
                         }
                         timer.done();
+                        println!("FilterExec output:\n{}", pretty_format_batches(&[filtered_batch.clone()]).unwrap());
                         poll = Poll::Ready(Some(Ok(filtered_batch)));
                         break;
                     }
