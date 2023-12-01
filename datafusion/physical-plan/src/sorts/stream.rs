@@ -22,6 +22,7 @@ use arrow::array::Array;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use arrow::row::{RowConverter, SortField};
+use arrow::util::pretty::pretty_format_batches;
 use datafusion_common::Result;
 use datafusion_execution::memory_pool::MemoryReservation;
 use futures::stream::{Fuse, StreamExt};
@@ -145,6 +146,7 @@ impl PartitionedStream for RowCursorStream {
     ) -> Poll<Option<Self::Output>> {
         Poll::Ready(ready!(self.streams.poll_next(cx, stream_idx)).map(|r| {
             r.and_then(|batch| {
+                println!("RowCursortStream input:\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
                 let cursor = self.convert_batch(&batch)?;
                 Ok((cursor, batch))
             })
