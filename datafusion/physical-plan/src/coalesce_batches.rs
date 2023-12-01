@@ -162,6 +162,7 @@ impl ExecutionPlan for CoalesceBatchesExec {
             buffered_rows: 0,
             is_closed: false,
             baseline_metrics: BaselineMetrics::new(&self.metrics, partition),
+            partition,
         }))
     }
 
@@ -189,6 +190,7 @@ struct CoalesceBatchesStream {
     is_closed: bool,
     /// Execution metrics
     baseline_metrics: BaselineMetrics,
+    partition: usize,
 }
 
 impl Stream for CoalesceBatchesStream {
@@ -226,11 +228,11 @@ impl CoalesceBatchesStream {
             match input_batch {
                 Poll::Ready(x) => match x {
                     Some(Ok(batch)) => {
-                        println!("CoalesceBatches input:\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
+                        println!("CoalesceBatches({}) input:\n{}", self.partition, pretty_format_batches(&[batch.clone()]).unwrap());
                         if batch.num_rows() >= self.target_batch_size
                             && self.buffer.is_empty()
                         {
-                            println!("CoalesceBatches output (A):\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
+                            println!("CoalesceBatches({}) output (A):\n{}", self.partition, pretty_format_batches(&[batch.clone()]).unwrap());
                             return Poll::Ready(Some(Ok(batch)));
                         } else if batch.num_rows() == 0 {
                             // discard empty batches
@@ -250,7 +252,7 @@ impl CoalesceBatchesStream {
                                 self.buffer.clear();
                                 self.buffered_rows = 0;
                                 // return batch
-                                println!("CoalesceBatches output (B):\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
+                                println!("CoalesceBatches({}) output (B):\n{}", self.partition, pretty_format_batches(&[batch.clone()]).unwrap());
                                 return Poll::Ready(Some(Ok(batch)));
                             }
                         }
@@ -272,7 +274,7 @@ impl CoalesceBatchesStream {
                             self.buffer.clear();
                             self.buffered_rows = 0;
                             // return batch
-                            println!("CoalesceBatches output (C):\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
+                            println!("CoalesceBatches({}) output (C):\n{}", self.partition, pretty_format_batches(&[batch.clone()]).unwrap());
                             return Poll::Ready(Some(Ok(batch)));
                         }
                     }

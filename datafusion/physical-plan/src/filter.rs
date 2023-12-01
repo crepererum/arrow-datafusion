@@ -182,6 +182,7 @@ impl ExecutionPlan for FilterExec {
             predicate: self.predicate.clone(),
             input: self.input.execute(partition, context)?,
             baseline_metrics,
+            partition,
         }))
     }
 
@@ -283,6 +284,7 @@ struct FilterExecStream {
     input: SendableRecordBatchStream,
     /// runtime metrics recording
     baseline_metrics: BaselineMetrics,
+    partition: usize,
 }
 
 pub(crate) fn batch_filter(
@@ -311,7 +313,7 @@ impl Stream for FilterExecStream {
             match self.input.poll_next_unpin(cx) {
                 Poll::Ready(value) => match value {
                     Some(Ok(batch)) => {
-                        println!("FilterExec input:\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
+                        println!("FilterExec({}) input:\n{}", self.partition, pretty_format_batches(&[batch.clone()]).unwrap());
                         let timer = self.baseline_metrics.elapsed_compute().timer();
                         let filtered_batch = batch_filter(&batch, &self.predicate)?;
                         // skip entirely filtered batches
@@ -319,7 +321,7 @@ impl Stream for FilterExecStream {
                             continue;
                         }
                         timer.done();
-                        println!("FilterExec output:\n{}", pretty_format_batches(&[filtered_batch.clone()]).unwrap());
+                        println!("FilterExec({}) output:\n{}", self.partition, pretty_format_batches(&[filtered_batch.clone()]).unwrap());
                         poll = Poll::Ready(Some(Ok(filtered_batch)));
                         break;
                     }
