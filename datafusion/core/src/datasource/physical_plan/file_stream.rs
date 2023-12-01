@@ -40,6 +40,7 @@ use crate::physical_plan::RecordBatchStream;
 use arrow::datatypes::SchemaRef;
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
+use arrow::util::pretty::pretty_format_batches;
 use datafusion_common::ScalarValue;
 
 use futures::future::BoxFuture;
@@ -505,6 +506,9 @@ impl<F: FileOpener> Stream for FileStream<F> {
     ) -> Poll<Option<Self::Item>> {
         self.file_stream_metrics.time_processing.start();
         let result = self.poll_inner(cx);
+        if let Poll::Ready(Some(Ok(batch))) = &result {
+            println!("FileStream output:\n{}", pretty_format_batches(&[batch.clone()]).unwrap());
+        }
         self.file_stream_metrics.time_processing.stop();
         self.baseline_metrics.record_poll(result)
     }
