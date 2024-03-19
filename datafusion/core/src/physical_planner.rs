@@ -74,6 +74,7 @@ use arrow::compute::SortOptions;
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow_array::builder::StringBuilder;
 use arrow_array::RecordBatch;
+use datafusion_common::config::ConfigOptions;
 use datafusion_common::display::ToStringifiedPlan;
 use datafusion_common::file_options::FileTypeWriterOptions;
 use datafusion_common::{
@@ -101,6 +102,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use itertools::{multiunzip, Itertools};
 use log::{debug, trace};
 use sqlparser::ast::NullTreatment;
+use tokio::task::JoinSet;
 
 fn create_function_physical_name(
     fun: &str,
@@ -465,7 +467,7 @@ impl PhysicalPlanner for DefaultPhysicalPlanner {
                 let plan = self
                     .create_initial_plan(logical_plan, session_state)
                     .await?;
-                self.optimize_internal(plan, session_state, |_, _| {})
+                self.optimize_internal(plan, session_state, |_, _| {}).await
             }
         }
     }
@@ -1818,9 +1820,10 @@ impl DefaultPhysicalPlanner {
                             );
                         }
 
-                        let optimized_plan = self.optimize_internal(
+                        let optimized_plan = Self::optimize_internal_blocking(
                             input,
-                            session_state,
+                            session_state.physical_optimizers(),
+                            session_state.config_options(),
                             |plan, optimizer| {
                                 let optimizer_name = optimizer.name().to_string();
                                 let plan_type = OptimizedPhysicalPlan { optimizer_name };
@@ -1887,16 +1890,38 @@ impl DefaultPhysicalPlanner {
 
     /// Optimize a physical plan by applying each physical optimizer,
     /// calling observer(plan, optimizer after each one)
-    fn optimize_internal<F>(
+    async fn optimize_internal<F>(
         &self,
         plan: Arc<dyn ExecutionPlan>,
         session_state: &SessionState,
+        observer: F,
+    ) -> Result<Arc<dyn ExecutionPlan>>
+    where
+        F: FnMut(&dyn ExecutionPlan, &dyn PhysicalOptimizerRule) + Send + 'static,
+    {
+        let optimizers = session_state.physical_optimizers().to_vec();
+        let config_options = session_state.config_options().clone();
+
+        let mut tasks = JoinSet::new();
+        tasks.spawn_blocking(move || {
+            Self::optimize_internal_blocking(plan, &optimizers, &config_options, observer)
+        });
+        tasks
+            .join_next()
+            .await
+            .expect("just added task")
+            .map_err(|e| DataFusionError::Internal(e.to_string()))?
+    }
+
+    fn optimize_internal_blocking<F>(
+        plan: Arc<dyn ExecutionPlan>,
+        optimizers: &[Arc<dyn PhysicalOptimizerRule + Send + Sync>],
+        config_options: &ConfigOptions,
         mut observer: F,
     ) -> Result<Arc<dyn ExecutionPlan>>
     where
         F: FnMut(&dyn ExecutionPlan, &dyn PhysicalOptimizerRule),
     {
-        let optimizers = session_state.physical_optimizers();
         debug!(
             "Input physical plan:\n{}\n",
             displayable(plan.as_ref()).indent(false)
@@ -1909,11 +1934,9 @@ impl DefaultPhysicalPlanner {
         let mut new_plan = plan;
         for optimizer in optimizers {
             let before_schema = new_plan.schema();
-            new_plan = optimizer
-                .optimize(new_plan, session_state.config_options())
-                .map_err(|e| {
-                    DataFusionError::Context(optimizer.name().to_string(), Box::new(e))
-                })?;
+            new_plan = optimizer.optimize(new_plan, config_options).map_err(|e| {
+                DataFusionError::Context(optimizer.name().to_string(), Box::new(e))
+            })?;
             if optimizer.schema_check() && new_plan.schema() != before_schema {
                 let e = DataFusionError::Internal(format!(
                     "PhysicalOptimizer rule '{}' failed, due to generate a different schema, original schema: {:?}, new schema: {:?}",
